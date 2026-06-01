@@ -8,7 +8,7 @@ pr:
       - develop
 
 pool:
-  name: Default     # ton pool self-hosted
+  name: Open Code     # ton pool self-hosted
 
 variables:
   - name: OPENCODE_MODEL
