@@ -1,0 +1,74 @@
+# azure-pipelines.yml
+trigger: none
+
+pr:
+  branches:
+    include:
+      - main
+      - develop
+
+pool:
+  name: Default     # ton pool self-hosted
+
+variables:
+  - name: OPENCODE_MODEL
+    value: 'ollama/qwen2.5-coder:7b-16k'
+  - name: OLLAMA_BASE_URL
+    value: 'http://localhost:11434'
+  - name: DOTNET_VERSION
+    value: '8.0.x'
+  - name: BUILD_CONFIGURATION
+    value: 'Release'
+  - name: COVERAGE_THRESHOLD
+    value: '70'
+  - name: MAX_FILES_FOR_AI
+    value: '20'
+  - name: DOTNET_NOLOGO
+    value: 'true'
+  - name: DOTNET_CLI_TELEMETRY_OPTOUT
+    value: '1'
+
+stages:
+  - stage: PR_Check
+    displayName: '🔍 PR Quality Check'
+    condition: eq(variables['Build.Reason'], 'PullRequest')
+    jobs:
+
+      # ─────────── JOB 1 : Conventions .NET ───────────
+      - job: OpenCodeLint
+        displayName: '📏 Conventions & Lint'
+        timeoutInMinutes: 30
+        steps:
+          - checkout: self
+            fetchDepth: 0
+            persistCredentials: true
+          - template: .pipelines/steps-opencode-lint.yml
+
+      # ─────────── JOB 2 : Review globale ───────────
+      - job: OpenCodeGlobalReview
+        displayName: '🔬 Global Architecture Review'
+        timeoutInMinutes: 30
+        steps:
+          - checkout: self
+            fetchDepth: 0
+            persistCredentials: true
+          - template: .pipelines/steps-opencode-review.yml
+
+      # ─────────── JOB 3 : Génération de tests xUnit/NUnit/MSTest ───────────
+      - job: OpenCodeTestGen
+        displayName: '🧪 AI Test Generation'
+        timeoutInMinutes: 45
+        steps:
+          - checkout: self
+            fetchDepth: 0
+            persistCredentials: true
+          - template: .pipelines/steps-opencode-testgen.yml
+
+      # ─────────── JOB 4 : Build + Tests + Couverture ───────────
+      - job: RunTestsAndCoverage
+        displayName: '🧪 Build, Tests & Coverage'
+        timeoutInMinutes: 30
+        steps:
+          - checkout: self
+            fetchDepth: 0
+          - template: .pipelines/steps-tests-dotnet.yml

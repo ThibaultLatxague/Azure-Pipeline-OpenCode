@@ -1,0 +1,126 @@
+# .pipelines/steps-opencode-testgen.yml
+# En fonction des tests déjà présents sur le projet,
+# créé des tests correspondants aux nouvelles fonctionnalités approtées par les fichiers
+steps:
+
+  - bash: |
+      set -euo pipefail
+      TARGET_BRANCH="$(System.PullRequest.TargetBranch)"
+      TARGET_BRANCH="${TARGET_BRANCH#refs/heads/}"
+      git fetch origin "$TARGET_BRANCH"
+
+      # Fichiers source modifiés (hors tests existants)
+      git diff --name-only --diff-filter=ACMR "origin/$TARGET_BRANCH"...HEAD \
+        | grep -Ev '(^node_modules/|^dist/|^build/|\.lock$|\.min\.|\.test\.|\.spec\.|/tests?/|/__tests__/)' \
+        | grep -E '\.(ts|tsx|js|jsx|py|cs|java|go|rb)$' \
+        > /tmp/source-files.txt || true
+
+      NB_FILES=$(wc -l < /tmp/source-files.txt)
+      echo "📂 Fichiers source à tester : $NB_FILES"
+      cat /tmp/source-files.txt
+
+      if [ "$NB_FILES" -gt "${MAX_FILES_FOR_AI}" ]; then
+        echo "⚠️  Trop de fichiers ($NB_FILES > ${MAX_FILES_FOR_AI}), on tronque"
+        head -n "${MAX_FILES_FOR_AI}" /tmp/source-files.txt > /tmp/source-files.tmp
+        mv /tmp/source-files.tmp /tmp/source-files.txt
+      fi
+    displayName: '📐 List source files to test'
+
+  - bash: |
+      set -euo pipefail
+
+      # ────────────────────────────────────────────────────────
+      # ÉTAPE 1 : Détection du framework de tests
+      # ────────────────────────────────────────────────────────
+
+      DETECT_PROMPT="Analyse le projet et identifie :
+      1. Le framework de tests utilisé (jest, vitest, pytest, xunit, nunit, junit, etc.)
+      2. La convention de nommage des fichiers de tests
+      3. L'emplacement des tests (à côté du source, dans /tests, dans /__tests__, etc.)
+      4. Les patterns utilisés (AAA, given-when-then, fixtures, mocks…)
+      5. Les bibliothèques d'assertions et de mocking utilisées
+
+      Réponds uniquement en JSON :
+      {
+        \"framework\": \"...\",
+        \"file_pattern\": \"...\",
+        \"location\": \"...\",
+        \"patterns\": [\"...\"],
+        \"libraries\": [\"...\"]
+      }"
+
+      opencode run \
+        --model "${OPENCODE_MODEL}" \
+        "$DETECT_PROMPT" \
+        > /tmp/test-framework.json 2>&1
+
+      echo "🧪 Framework détecté :"
+      cat /tmp/test-framework.json
+    displayName: '🔎 Detect test framework'
+
+  - bash: |
+      set -euo pipefail
+      mkdir -p /tmp/generated-tests
+
+      # ────────────────────────────────────────────────────────
+      # ÉTAPE 2 : Génération des tests pour chaque fichier
+      # ────────────────────────────────────────────────────────
+
+      while IFS= read -r FILE; do
+        [ -z "$FILE" ] && continue
+        [ ! -f "$FILE" ] && continue
+
+        echo ""
+        echo "🧪 Génération de tests pour : $FILE"
+
+        GEN_PROMPT="Voici les caractéristiques du framework de tests du projet :
+        $(cat /tmp/test-framework.json)
+
+        Génère des tests unitaires COMPLETS pour le fichier suivant : $FILE
+
+        Contraintes :
+        - Utilise EXACTEMENT le framework et les bibliothèques détectés
+        - Respecte les patterns observés dans le projet
+        - Couvre : cas nominal, cas limites, cas d'erreur, valeurs nulles/vides
+        - Mocke les dépendances externes
+        - Sois exhaustif sur la couverture des branches
+
+        Sortie : UNIQUEMENT le code des tests, sans explications, sans markdown.
+        Le code doit être directement exécutable."
+
+        SAFE_NAME=$(echo "$FILE" | tr '/' '_')
+        opencode run \
+          --model "${OPENCODE_MODEL}" \
+          "$GEN_PROMPT" \
+          > "/tmp/generated-tests/${SAFE_NAME}.generated" 2>&1
+
+        echo "  ✅ Tests générés → ${SAFE_NAME}.generated"
+      done < /tmp/source-files.txt
+
+      echo ""
+      echo "📦 Récap des tests générés :"
+      ls -la /tmp/generated-tests/
+    displayName: '🤖 Generate tests'
+
+  - publish: /tmp/generated-tests
+    artifact: generated-tests
+    displayName: '📦 Publish generated tests'
+
+  - bash: |
+      set -euo pipefail
+      cat > /tmp/testgen-summary.md << 'EOF'
+      # 🧪 Tests générés par OpenCode
+
+      Les tests ci-joints ont été générés automatiquement à partir des fichiers modifiés dans cette PR.
+
+      ⚠️ **Important** : ces tests sont une proposition, ils doivent être **relus et validés** avant d'être intégrés au repository.
+
+      ## Fichiers analysés
+      EOF
+      cat /tmp/source-files.txt >> /tmp/testgen-summary.md
+      cat /tmp/testgen-summary.md
+    displayName: '📝 Summary'
+
+  - publish: /tmp/testgen-summary.md
+    artifact: testgen-summary
+    displayName: '📦 Publish summary'
