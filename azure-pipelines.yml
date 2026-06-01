@@ -6,13 +6,14 @@ pr:
     include:
       - main
       - develop
+    # Si on veut que toute les PR soient prises en compte, remplacer par include: - '*'
 
 pool:
-  name: Default     # ton pool self-hosted
+  name: Default
 
 variables:
   - name: OPENCODE_MODEL
-    value: 'ollama/qwen2.5-coder:7b-16k'
+    value: 'ollama/qwen2.5-coder:7b-16k' # On prend le modèle créé en local
   - name: OLLAMA_BASE_URL
     value: 'http://localhost:11434'
   - name: DOTNET_VERSION
