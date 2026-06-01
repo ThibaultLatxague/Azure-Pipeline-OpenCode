@@ -1,0 +1,121 @@
+# .pipelines/steps-opencode-lint.yml
+# Vérifie les conventions du projet sur les fichiers modifiés par la PR
+# en fonction des règles extraites du codebase par OpenCode lui-même.
+steps:
+
+  - bash: |
+      set -euo pipefail
+      opencode --version
+      curl -fsS "${OLLAMA_BASE_URL}/api/tags" > /dev/null
+      echo "✅ Prérequis OK"
+    displayName: '🔧 Check prerequisites'
+
+  - bash: |
+      set -euo pipefail
+      TARGET_BRANCH="$(System.PullRequest.TargetBranch)"
+      TARGET_BRANCH="${TARGET_BRANCH#refs/heads/}"
+      git fetch origin "$TARGET_BRANCH"
+
+      # Liste des fichiers modifiés (hors deletes)
+      git diff --name-only --diff-filter=ACMR "origin/$TARGET_BRANCH"...HEAD \
+        | grep -Ev '(^node_modules/|^dist/|^build/|\.lock$|\.min\.)' \
+        > /tmp/changed-files.txt || true
+
+      echo "📂 Fichiers modifiés dans la PR :"
+      cat /tmp/changed-files.txt
+
+      # Diff complet
+      git diff "origin/$TARGET_BRANCH"...HEAD -- $(cat /tmp/changed-files.txt) > /tmp/pr.diff || true
+    displayName: '📐 Compute diff & changed files'
+
+  - bash: |
+      set -euo pipefail
+
+      # ────────────────────────────────────────────────────────
+      # ÉTAPE 1 : OpenCode parcourt TOUT le repo et extrait
+      #          les conventions de nommage observées
+      # ────────────────────────────────────────────────────────
+
+      EXTRACT_PROMPT="Tu es un expert en revue de code. Parcours l'intégralité du codebase de ce repository (lis les fichiers source pertinents) et déduis les conventions de codage RÉELLEMENT utilisées dans le projet.
+
+      Produis un document Markdown structuré listant :
+      1. **Nommage des variables** (camelCase, snake_case, etc.) avec exemples observés
+      2. **Nommage des fonctions/méthodes**
+      3. **Nommage des classes/types/interfaces**
+      4. **Nommage des constantes**
+      5. **Nommage des fichiers et dossiers**
+      6. **Conventions d'imports** (ordre, regroupement, alias)
+      7. **Style des commentaires et docstrings**
+      8. **Patterns architecturaux récurrents** (ex: structure des dossiers, séparation services/controllers, etc.)
+      9. **Conventions de gestion d'erreurs**
+      10. **Tout autre pattern notable**
+
+      Pour chaque règle, donne 2-3 exemples concrets tirés du code existant. Sois factuel : ne propose pas de bonnes pratiques générales, décris UNIQUEMENT ce qui est effectivement utilisé dans CE projet.
+
+      Ignore : node_modules/, dist/, build/, .git/, fichiers minifiés et lock files."
+
+      echo "🔍 Extraction des conventions du codebase..."
+      opencode run \
+        --model "${OPENCODE_MODEL}" \
+        "$EXTRACT_PROMPT" \
+        > /tmp/conventions.md 2>&1
+
+      echo "✅ Conventions extraites :"
+      echo "─────────────────────────────────"
+      cat /tmp/conventions.md
+      echo "─────────────────────────────────"
+    displayName: '🧠 Extract codebase conventions'
+
+  - bash: |
+      set -euo pipefail
+
+      # ────────────────────────────────────────────────────────
+      # ÉTAPE 2 : Vérification du diff contre les conventions
+      # ────────────────────────────────────────────────────────
+
+      if [ ! -s /tmp/pr.diff ]; then
+        echo "⚠️  Diff vide, rien à vérifier"
+        echo "## Aucune violation détectée (diff vide)" > /tmp/lint-report.md
+        exit 0
+      fi
+
+      CHECK_PROMPT="Tu es un linter. Voici les conventions de codage de ce projet, extraites du codebase :
+
+      === CONVENTIONS DU PROJET ===
+      $(cat /tmp/conventions.md)
+      === FIN CONVENTIONS ===
+
+      Analyse maintenant le diff suivant de la Pull Request et identifie TOUTES les violations de ces conventions. Pour chaque violation :
+      - Fichier et numéro de ligne approximatif
+      - Nature de la violation (nommage, structure, imports, etc.)
+      - Convention attendue (extraite des règles ci-dessus)
+      - Suggestion de correction concrète
+
+      Si AUCUNE violation, indique-le clairement.
+      Sois strict mais factuel : ne signale que ce qui contredit explicitement les conventions extraites.
+
+      Format de sortie : Markdown avec sections par fichier.
+
+      === DIFF DE LA PR ===
+      \`\`\`diff
+      $(cat /tmp/pr.diff)
+      \`\`\`"
+
+      echo "🔍 Vérification de la PR contre les conventions..."
+      opencode run \
+        --model "${OPENCODE_MODEL}" \
+        "$CHECK_PROMPT" \
+        > /tmp/lint-report.md 2>&1
+
+      echo "─────────────────────────────────"
+      cat /tmp/lint-report.md
+      echo "─────────────────────────────────"
+    displayName: '🔎 Check PR against conventions'
+
+  - publish: /tmp/conventions.md
+    artifact: codebase-conventions
+    displayName: '📦 Publish conventions'
+
+  - publish: /tmp/lint-report.md
+    artifact: lint-report
+    displayName: '📦 Publish lint report'

@@ -1,0 +1,112 @@
+# .pipelines/steps-tests-dotnet.yml
+steps:
+
+  - task: UseDotNet@2
+    inputs:
+      packageType: 'sdk'
+      version: $(DOTNET_VERSION)
+    displayName: '🔧 Setup .NET SDK $(DOTNET_VERSION)'
+
+  - bash: |
+      dotnet --version
+      dotnet --info
+    displayName: '🔧 .NET info'
+
+  - bash: dotnet restore
+    displayName: '📦 Restore NuGet packages'
+
+  - bash: dotnet build --configuration $(BUILD_CONFIGURATION) --no-restore
+    displayName: '🔨 Build solution'
+
+  - bash: |
+      set -euo pipefail
+      # Lancement des tests avec couverture Cobertura
+      # Fonctionne avec xUnit, NUnit et MSTest dès lors que coverlet.collector est dans les projets de test
+      dotnet test \
+        --configuration $(BUILD_CONFIGURATION) \
+        --no-build \
+        --logger "trx;LogFileName=test-results.trx" \
+        --logger "console;verbosity=normal" \
+        --collect:"XPlat Code Coverage" \
+        --results-directory $(Agent.TempDirectory)/TestResults \
+        --settings coverlet.runsettings
+    displayName: '🧪 Run tests with coverage'
+
+  - task: PublishTestResults@2
+    condition: succeededOrFailed()
+    inputs:
+      testResultsFormat: 'VSTest'
+      testResultsFiles: '$(Agent.TempDirectory)/TestResults/**/*.trx'
+      failTaskOnFailedTests: true
+      mergeTestResults: true
+      testRunTitle: 'PR Tests - $(Build.BuildId)'
+    displayName: '📊 Publish test results'
+
+  - bash: |
+      set -euo pipefail
+      # Installation de ReportGenerator pour fusionner et générer le rapport
+      dotnet tool install -g dotnet-reportgenerator-globaltool || \
+        dotnet tool update -g dotnet-reportgenerator-globaltool
+      export PATH="$PATH:$HOME/.dotnet/tools"
+
+      # Fusion des fichiers cobertura de tous les projets de tests
+      reportgenerator \
+        -reports:"$(Agent.TempDirectory)/TestResults/**/coverage.cobertura.xml" \
+        -targetdir:"$(Agent.TempDirectory)/CoverageReport" \
+        -reporttypes:"Cobertura;HtmlInline_AzurePipelines;TextSummary"
+
+      echo "📄 Résumé de couverture :"
+      cat "$(Agent.TempDirectory)/CoverageReport/Summary.txt"
+    displayName: '📊 Merge coverage reports'
+
+  - task: PublishCodeCoverageResults@2
+    condition: succeededOrFailed()
+    inputs:
+      summaryFileLocation: '$(Agent.TempDirectory)/CoverageReport/Cobertura.xml'
+      pathToSources: '$(Build.SourcesDirectory)'
+    displayName: '📊 Publish coverage to Azure DevOps'
+
+  - bash: |
+      set -euo pipefail
+
+      COVERAGE_FILE="$(Agent.TempDirectory)/CoverageReport/Cobertura.xml"
+      if [ ! -f "$COVERAGE_FILE" ]; then
+        echo "❌ Fichier de couverture introuvable : $COVERAGE_FILE"
+        exit 1
+      fi
+
+      LINE_RATE=$(grep -oP 'line-rate="\K[0-9.]+' "$COVERAGE_FILE" | head -n1)
+      BRANCH_RATE=$(grep -oP 'branch-rate="\K[0-9.]+' "$COVERAGE_FILE" | head -n1)
+      LINE_PCT=$(awk "BEGIN {printf \"%.2f\", $LINE_RATE * 100}")
+      BRANCH_PCT=$(awk "BEGIN {printf \"%.2f\", $BRANCH_RATE * 100}")
+
+      echo "📊 Couverture des lignes    : ${LINE_PCT}%"
+      echo "📊 Couverture des branches  : ${BRANCH_PCT}%"
+      echo "🎯 Seuil requis (lignes)    : ${COVERAGE_THRESHOLD}%"
+
+      cat > /tmp/coverage-report.md << EOF
+      # 📊 Rapport de couverture .NET
+
+      | Métrique | Valeur | Seuil |
+      |----------|--------|-------|
+      | Couverture des lignes | ${LINE_PCT}% | ${COVERAGE_THRESHOLD}% |
+      | Couverture des branches | ${BRANCH_PCT}% | — |
+
+      EOF
+
+      RESULT=$(awk "BEGIN {print ($LINE_PCT >= $COVERAGE_THRESHOLD) ? 1 : 0}")
+      if [ "$RESULT" -eq 1 ]; then
+        echo "✅ Couverture suffisante"
+        echo "**Statut : ✅ OK**" >> /tmp/coverage-report.md
+      else
+        echo "❌ Couverture insuffisante (${LINE_PCT}% < ${COVERAGE_THRESHOLD}%)"
+        echo "**Statut : ❌ ÉCHEC**" >> /tmp/coverage-report.md
+        cat /tmp/coverage-report.md
+        exit 1
+      fi
+    displayName: '🎯 Check coverage threshold'
+
+  - publish: /tmp/coverage-report.md
+    artifact: coverage-report
+    condition: always()
+    displayName: '📦 Publish coverage report'

@@ -1,0 +1,124 @@
+# .pipelines/steps-opencode-review.yml
+# Analyse les fichiers et leurs dépendances pour évaluer l'impact global de la PR
+# sur l'architecture du projet
+steps:
+
+  - bash: |
+      set -euo pipefail
+      TARGET_BRANCH="$(System.PullRequest.TargetBranch)"
+      TARGET_BRANCH="${TARGET_BRANCH#refs/heads/}"
+      git fetch origin "$TARGET_BRANCH"
+
+      git diff --name-only --diff-filter=ACMR "origin/$TARGET_BRANCH"...HEAD \
+        | grep -Ev '(^node_modules/|^dist/|^build/|\.lock$|\.min\.|test/|\.test\.|\.spec\.)' \
+        > /tmp/changed-files.txt || true
+
+      git diff "origin/$TARGET_BRANCH"...HEAD > /tmp/pr.diff || true
+
+      echo "📂 Fichiers modifiés (hors tests) :"
+      cat /tmp/changed-files.txt
+    displayName: '📐 Compute scope'
+
+  - bash: |
+      set -euo pipefail
+
+      # ────────────────────────────────────────────────────────
+      # ÉTAPE 1 : Cartographie de l'impact
+      # On demande à OpenCode de découvrir les dépendances
+      # ────────────────────────────────────────────────────────
+
+      CHANGED_FILES=$(cat /tmp/changed-files.txt | tr '\n' ' ')
+
+      IMPACT_PROMPT="Tu es un architecte logiciel. Voici les fichiers modifiés dans la Pull Request :
+      $CHANGED_FILES
+
+      Ta mission :
+      1. Lis chacun de ces fichiers pour comprendre leur rôle
+      2. Identifie tous les fichiers du projet qui DÉPENDENT de ces fichiers (qui les importent)
+      3. Identifie tous les fichiers dont DÉPENDENT ces fichiers (qu'ils importent)
+      4. Repère les composants/modules/couches architecturales impactés
+
+      Produis une cartographie Markdown :
+      ## Fichiers modifiés
+      ## Dépendants directs (fichiers impactés)
+      ## Dépendances utilisées
+      ## Modules/couches affectés
+      ## Risques de régression"
+
+      echo "🗺️  Cartographie de l'impact..."
+      opencode run \
+        --model "${OPENCODE_MODEL}" \
+        "$IMPACT_PROMPT" \
+        > /tmp/impact-map.md 2>&1
+
+      cat /tmp/impact-map.md
+    displayName: '🗺️ Map architectural impact'
+
+  - bash: |
+      set -euo pipefail
+
+      # ────────────────────────────────────────────────────────
+      # ÉTAPE 2 : Review globale avec contexte d'impact
+      # ────────────────────────────────────────────────────────
+
+      REVIEW_PROMPT="Tu es un reviewer senior. Tu disposes :
+
+      === CARTOGRAPHIE D'IMPACT ===
+      $(cat /tmp/impact-map.md)
+      === FIN CARTOGRAPHIE ===
+
+      === DIFF DE LA PR ===
+      \`\`\`diff
+      $(cat /tmp/pr.diff)
+      \`\`\`
+      === FIN DIFF ===
+
+      Effectue une review COMPLÈTE qui va au-delà du simple diff. Lis aussi les fichiers dépendants identifiés dans la cartographie pour évaluer les effets de bord.
+
+      Produis un rapport Markdown structuré :
+
+      ## 1. Résumé exécutif
+      Synthèse en 3-5 lignes de ce que fait la PR.
+
+      ## 2. Analyse architecturale
+      - Cohérence avec l'architecture existante
+      - Respect des couches/séparations
+      - Patterns introduits ou modifiés
+
+      ## 3. Impact sur les dépendants
+      Pour chaque fichier dépendant identifié, indique si la PR le casse, le dégrade, ou nécessite une adaptation.
+
+      ## 4. Risques détectés
+      - Bugs potentiels
+      - Régressions
+      - Problèmes de sécurité
+      - Problèmes de performance
+      - Problèmes de concurrence/threads
+
+      ## 5. Couverture fonctionnelle
+      Les cas limites sont-ils gérés ? Les erreurs sont-elles traitées ?
+
+      ## 6. Suggestions concrètes
+      Liste priorisée (🔴 critique, 🟠 majeur, 🟡 mineur).
+
+      ## 7. Verdict
+      ✅ Mergeable / ⚠️ À retravailler / ❌ Bloquant"
+
+      echo "🔬 Review globale en cours..."
+      opencode run \
+        --model "${OPENCODE_MODEL}" \
+        "$REVIEW_PROMPT" \
+        > /tmp/global-review.md 2>&1
+
+      echo "─────────────────────────────────"
+      cat /tmp/global-review.md
+      echo "─────────────────────────────────"
+    displayName: '🔬 Run global review'
+
+  - publish: /tmp/impact-map.md
+    artifact: impact-map
+    displayName: '📦 Publish impact map'
+
+  - publish: /tmp/global-review.md
+    artifact: global-review
+    displayName: '📦 Publish global review'
