@@ -31,7 +31,7 @@ variables:
 stages:
   - stage: PR_Check
     displayName: '🔍 PR Quality Check'
-    condition: eq(variables['Build.Reason'], 'PullRequest')
+    condition: always() # Always pour tests sinon remettre eq(variables['Build.Reason'], 'PullRequest')
     jobs:
 
       # ─────────── JOB 1 : Conventions .NET ───────────
