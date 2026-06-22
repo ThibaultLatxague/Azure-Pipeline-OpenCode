@@ -47,7 +47,6 @@ steps:
 
       echo "🗺️  Cartographie de l'impact..."
       opencode run \
-        --model "${OPENCODE_MODEL}" \
         "$IMPACT_PROMPT" \
         > /tmp/impact-map.md 2>&1
 
@@ -106,7 +105,6 @@ steps:
 
       echo "🔬 Review globale en cours..."
       opencode run \
-        --model "${OPENCODE_MODEL}" \
         "$REVIEW_PROMPT" \
         > /tmp/global-review.md 2>&1
 

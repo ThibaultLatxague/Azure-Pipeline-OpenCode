@@ -50,7 +50,6 @@ steps:
       }"
 
       opencode run \
-        --model "${OPENCODE_MODEL}" \
         "$DETECT_PROMPT" \
         > /tmp/test-framework.json 2>&1
 
@@ -90,7 +89,6 @@ steps:
 
         SAFE_NAME=$(echo "$FILE" | tr '/' '_')
         opencode run \
-          --model "${OPENCODE_MODEL}" \
           "$GEN_PROMPT" \
           > "/tmp/generated-tests/${SAFE_NAME}.generated" 2>&1
 

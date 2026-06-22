@@ -6,7 +6,6 @@ steps:
   - bash: |
       set -euo pipefail
       opencode --version
-      curl -fsS "${OLLAMA_BASE_URL}/api/tags" > /dev/null
       echo "✅ Prérequis OK"
     displayName: '🔧 Check prerequisites'
 
@@ -56,7 +55,6 @@ steps:
 
       echo "🔍 Extraction des conventions du codebase..."
       opencode run \
-        --model "${OPENCODE_MODEL}" \
         "$EXTRACT_PROMPT" \
         > /tmp/conventions.md 2>&1
 
@@ -103,7 +101,6 @@ steps:
 
       echo "🔍 Vérification de la PR contre les conventions..."
       opencode run \
-        --model "${OPENCODE_MODEL}" \
         "$CHECK_PROMPT" \
         > /tmp/lint-report.md 2>&1
 
