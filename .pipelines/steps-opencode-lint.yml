@@ -3,6 +3,9 @@
 # en fonction des règles extraites du codebase par OpenCode lui-même.
 steps:
 
+  - powershell: Write-Host "##vso[task.prependpath]C:\Program Files\Git\bin"
+    displayName: '🔧 Use Git Bash'
+
   - bash: |
       set -euo pipefail
       opencode --version

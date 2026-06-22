@@ -1,6 +1,9 @@
 # .pipelines/steps-tests-dotnet.yml
 steps:
 
+  - powershell: Write-Host "##vso[task.prependpath]C:\Program Files\Git\bin"
+    displayName: '🔧 Use Git Bash'
+
   - task: UseDotNet@2
     inputs:
       packageType: 'sdk'

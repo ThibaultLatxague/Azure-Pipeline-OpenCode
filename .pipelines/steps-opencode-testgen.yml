@@ -3,6 +3,9 @@
 # créé des tests correspondants aux nouvelles fonctionnalités approtées par les fichiers
 steps:
 
+  - powershell: Write-Host "##vso[task.prependpath]C:\Program Files\Git\bin"
+    displayName: '🔧 Use Git Bash'
+
   - bash: |
       set -euo pipefail
       TARGET_BRANCH="$(System.PullRequest.TargetBranch)"
