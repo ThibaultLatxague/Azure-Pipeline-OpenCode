@@ -8,7 +8,7 @@ pr:
       - develop
 
 pool:
-  name: Default     # ton pool self-hosted
+  name: Open Code     # ton pool self-hosted
 
 variables:
   - name: DOTNET_VERSION
@@ -27,7 +27,7 @@ variables:
 stages:
   - stage: PR_Check
     displayName: '🔍 PR Quality Check'
-    condition: eq(variables['Build.Reason'], 'PullRequest')
+    condition: always() # Always pour tests sinon remettre eq(variables['Build.Reason'], 'PullRequest')
     jobs:
 
       # ─────────── JOB 1 : Conventions .NET ───────────
