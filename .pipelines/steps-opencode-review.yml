@@ -8,7 +8,11 @@ steps:
 
   - bash: |
       set -euo pipefail
-      TARGET_BRANCH="$(System.PullRequest.TargetBranch)"
+      TARGET_BRANCH="${SYSTEM_PULLREQUEST_TARGETBRANCH:-}"
+      if [ -z "$TARGET_BRANCH" ]; then
+        TARGET_BRANCH="main"
+        echo "⚠️ Pas une Pull Request — fallback sur la branche '$TARGET_BRANCH'"
+      fi
       TARGET_BRANCH="${TARGET_BRANCH#refs/heads/}"
       git fetch origin "$TARGET_BRANCH"
 
