@@ -11,6 +11,8 @@ pool:
   name: Open Code     # ton pool self-hosted
 
 variables:
+  - name: BASH_PATH
+    value: 'C:\Program Files\Git\bin\bash.exe'
   - name: DOTNET_VERSION
     value: '8.0.x'
   - name: BUILD_CONFIGURATION
